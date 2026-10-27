@@ -1,5 +1,11 @@
 # signalk-n2k-displays
 
+## About this fork
+
+This experimental fork builds on [Scott Bender's signalk-n2k-displays](https://github.com/sbender9/signalk-n2k-displays) and [htool's instrument lighting PR #16](https://github.com/sbender9/signalk-n2k-displays/pull/16). Its goal is configurable display presets for mixed Raymarine and B&G networks, allowing a Signal K or Node-RED mode change to apply each display group's chosen palette and brightness.
+
+Development is informed by testing with Raymarine P70/i70 and B&G Zeus/Nemesis displays. Preset functionality is a development goal and is not yet complete or validated. Changes will be tested before being proposed upstream.
+
 Signal K plugin that controls and syncs NMEA 2000 display devices from Raymarine and Navico.
 
 You can control brightness, night mode, and colors via Signal K.
