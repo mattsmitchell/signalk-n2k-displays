@@ -27,14 +27,14 @@ function vendorValues (messages) {
 describe('explicit presets', function () {
   const presets = {
     enabled: true,
-    night: {
-      navico: [{ group: 'default', brightness: 66 }],
+    profiles: [{ name: 'night',
+      navico: [{ group: 'default', brightness: 66, palette: 'night' }],
       raymarine: [
         { group: 'helm1', brightness: 40, color: 'red/black' },
         { group: 'cockpit', brightness: 50, color: 'inverse' }
       ]
     },
-    day: { navico: [{ group: 'default', brightness: 100 }], raymarine: [{ group: 'helm1', brightness: 100, color: 'day1' }] }
+    { name: 'day', navico: [{ group: 'default', brightness: 100, palette: 'day' }], raymarine: [{ group: 'helm1', brightness: 100, color: 'day1' }] }]
   }
 
   it('does not apply display settings or subscribe to automatic sources on start', function () {
@@ -72,7 +72,7 @@ describe('explicit presets', function () {
   })
 
   it('rejects bad or disabled groups before publishing anything', function () {
-    const bad = { enabled: true, night: { navico: [{ group: 'default', brightness: 66 }], raymarine: [{ group: 'helm1', brightness: 50, color: 'invalid' }] } }
+    const bad = { enabled: true, profiles: [{ name: 'night', navico: [{ group: 'default', brightness: 66, palette: 'night' }], raymarine: [{ group: 'helm1', brightness: 50, color: 'invalid' }] }] }
     const f = fixture(bad)
     f.messages.length = 0
     assert.strictEqual(f.puts['electrical.displays.preset']('', '', 'night').statusCode, 400)
@@ -89,7 +89,7 @@ describe('explicit presets', function () {
       [{ group: 'default', brightness: 101 }],
       [{ group: 'default', brightness: 1.5 }]
     ]) {
-      const f = fixture({ enabled: true, night: { navico: rows } })
+      const f = fixture({ enabled: true, profiles: [{ name: 'night', navico: rows.map(row => ({ ...row, palette: 'night' })) }] })
       f.messages.length = 0
       assert.strictEqual(f.puts['electrical.displays.preset']('', '', 'night').statusCode, 400)
       assert.deepStrictEqual(values(f.messages), [])

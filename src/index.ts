@@ -95,8 +95,9 @@ function presetSchema () {
     properties: {
       navico: {
         type: 'array', title: 'B&G / Navico groups',
-        items: { type: 'object', required: ['group', 'brightness'], properties: {
+        items: { type: 'object', required: ['group', 'brightness', 'palette'], properties: {
           group: { type: 'string', enum: Object.keys(simradDisplayGroups), enumNames: Object.values(simradDisplayGroups) },
+          palette: { type: 'string', title: 'Palette', enum: ['day', 'night'] },
           brightness
         } }
       },
@@ -344,9 +345,8 @@ export default function (app: any) {
             description: 'When enabled, apply day or night only on an explicit preset PUT. Automatic steering, group sync and startup mapping are disabled.',
             type: 'object',
             properties: {
-              enabled: { type: 'boolean', title: 'Enable explicit presets', default: false },
-              day: presetSchema(),
-              night: presetSchema()
+              enabled: { type: 'boolean', title: 'Allow profile output to the network via the configured converter', default: false },
+              profiles: { type: 'array', title: 'Profiles', items: { ...presetSchema(), required: ['name'], properties: { name: { type: 'string', title: 'Profile name', minLength: 1 }, ...presetSchema().properties } } }
             }
           },
           time: {
@@ -1244,10 +1244,15 @@ export default function (app: any) {
       if (!presetMode()) {
         return { state: 'COMPLETED', statusCode: 409, message: 'Explicit presets are not enabled' }
       }
-      if (value !== 'day' && value !== 'night') {
-        return { state: 'COMPLETED', statusCode: 400, message: 'Preset must be day or night' }
+      if (typeof value !== 'string' || !value.trim()) {
+        return { state: 'COMPLETED', statusCode: 400, message: 'Profile name is required' }
       }
-      const preset = props.presets[value]
+      const profiles = props.presets.profiles
+      const matches = Array.isArray(profiles) ? profiles.filter((profile: any) => profile && profile.name === value) : []
+      if (matches.length !== 1) {
+        return { state: 'COMPLETED', statusCode: 400, message: 'Profile name is missing or duplicated' }
+      }
+      const preset = matches[0]
       if (!preset || typeof preset !== 'object') {
         return { state: 'COMPLETED', statusCode: 400, message: 'Preset is not configured' }
       }
@@ -1267,6 +1272,7 @@ export default function (app: any) {
               (vendor === 'raymarine' && !raymarineI70Enabled()) ||
               typeof row.brightness !== 'number' || !Number.isInteger(row.brightness) || row.brightness < 0 || row.brightness > 100 ||
               (vendor === 'raymarine' && !Object.prototype.hasOwnProperty.call(raymarineColorMap, row.color)) ||
+              (vendor === 'navico' && row.palette !== 'day' && row.palette !== 'night') ||
               seen[vendor + '.' + row.group]) {
             return { state: 'COMPLETED', statusCode: 400, message: `Invalid or duplicate ${vendor} group in ${value} preset` }
           }
@@ -1274,14 +1280,14 @@ export default function (app: any) {
         }
       }
       navico.forEach((row: any) => {
-        setSimradDisplayNightMode(row.group, value === 'night' ? 1 : 0)
+        setSimradDisplayNightMode(row.group, row.palette === 'night' ? 1 : 0)
         setSimradDisplayBrightness(row.group, row.brightness / 100)
       })
       raymarine.forEach((row: any) => {
         setRaymarineDisplayColor(row.group, row.color)
         setRaymarineDisplayBrightness(row.group, row.brightness / 100)
       })
-      app.handleMessage(plugin.id, intentDelta(path, value, { displayName: 'Applied display preset', enum: ['day', 'night'] }))
+      app.handleMessage(plugin.id, intentDelta(path, value, { displayName: 'Applied display profile' }))
       return { state: 'COMPLETED', statusCode: 200 }
     })
   }
