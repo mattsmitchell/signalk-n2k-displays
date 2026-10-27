@@ -88,6 +88,30 @@ function brightnessField (title: string, defaultValue: number) {
   }
 }
 
+function presetSchema () {
+  const brightness = { type: 'integer', title: 'Brightness (%)', minimum: 0, maximum: 100 }
+  return {
+    type: 'object',
+    properties: {
+      navico: {
+        type: 'array', title: 'B&G / Navico groups',
+        items: { type: 'object', required: ['group', 'brightness'], properties: {
+          group: { type: 'string', enum: Object.keys(simradDisplayGroups), enumNames: Object.values(simradDisplayGroups) },
+          brightness
+        } }
+      },
+      raymarine: {
+        type: 'array', title: 'Raymarine groups',
+        items: { type: 'object', required: ['group', 'brightness', 'color'], properties: {
+          group: { type: 'string', enum: Object.keys(raymarineDisplayGroups), enumNames: Object.values(raymarineDisplayGroups) },
+          brightness,
+          color: { type: 'string', title: 'Palette', enum: Object.keys(raymarineColorMap), enumNames: Object.values(raymarineColorMap) }
+        } }
+      }
+    }
+  }
+}
+
 function sunSchemaProperties () {
   const properties: any = {}
   SUN_BINS.forEach(bin => {
@@ -180,26 +204,30 @@ export default function (app: any) {
       lastSeen = {}
       hasApplied = false
       setupIntentPaths()
-      setupRaymarineBrightness()
-      setupRaymarineColor()
-      setupRaymarineNightMode()
-      setupRaymarineSt60Brightness()
+      if (!presetMode()) {
+        setupRaymarineBrightness()
+        setupRaymarineColor()
+        setupRaymarineNightMode()
+        setupRaymarineSt60Brightness()
+        setupSimradBrightness()
+        setupSimradNightColor()
+        setupSimradNightMode()
+      }
+      setupPresetPath()
 
-      setupSimradBrightness()
-      setupSimradNightColor()
-      setupSimradNightMode()
-
-      if (app.subscriptionmanager) {
+      if (app.subscriptionmanager && !presetMode()) {
         subscribeToSources()
       }
 
-      if (groupMappings().length > 0) {
+      if (!presetMode() && groupMappings().length > 0) {
         subscribeToSimnet()
         if (raymarineI70Enabled()) {
           subscribeToRaymarine()
         }
       }
-      applyStartMapping()
+      if (!presetMode()) {
+        applyStartMapping()
+      }
     },
 
     stop: function () {
@@ -309,6 +337,16 @@ export default function (app: any) {
             type: 'object',
             properties: {
               groups: navicoGroups
+            }
+          },
+          presets: {
+            title: 'Explicit display presets',
+            description: 'When enabled, apply day or night only on an explicit preset PUT. Automatic steering, group sync and startup mapping are disabled.',
+            type: 'object',
+            properties: {
+              enabled: { type: 'boolean', title: 'Enable explicit presets', default: false },
+              day: presetSchema(),
+              night: presetSchema()
             }
           },
           time: {
@@ -618,6 +656,9 @@ export default function (app: any) {
         'vessels.self',
         path,
         (_context: string, putPath: string, value: any) => {
+          if (presetMode()) {
+            return { state: 'COMPLETED', statusCode: 409, message: 'Use electrical.displays.preset while explicit presets are enabled' }
+          }
           const parsed = parseIntentPut(putPath, value)
           if (!parsed.ok) {
             return {
@@ -691,6 +732,9 @@ export default function (app: any) {
   }
 
   function applyCompatPut (value: any) {
+    if (presetMode()) {
+      return { state: 'COMPLETED', statusCode: 409, message: 'Use electrical.displays.preset while explicit presets are enabled' }
+    }
     const parsed = parseCompatPut(value)
     if (!parsed.ok) {
       return {
@@ -1188,6 +1232,58 @@ export default function (app: any) {
       groupsConfig[group] !== undefined &&
       groupsConfig[group] === false
     )
+  }
+
+  function presetMode (): boolean {
+    return !!(props && props.presets && props.presets.enabled === true)
+  }
+
+  function setupPresetPath () {
+    const path = 'electrical.displays.preset'
+    app.registerPutHandler('vessels.self', path, (_context: string, _path: string, value: any) => {
+      if (!presetMode()) {
+        return { state: 'COMPLETED', statusCode: 409, message: 'Explicit presets are not enabled' }
+      }
+      if (value !== 'day' && value !== 'night') {
+        return { state: 'COMPLETED', statusCode: 400, message: 'Preset must be day or night' }
+      }
+      const preset = props.presets[value]
+      if (!preset || typeof preset !== 'object') {
+        return { state: 'COMPLETED', statusCode: 400, message: 'Preset is not configured' }
+      }
+      const navico = preset.navico === undefined ? [] : preset.navico
+      const raymarine = preset.raymarine === undefined ? [] : preset.raymarine
+      if (!Array.isArray(navico) || !Array.isArray(raymarine) || navico.length + raymarine.length === 0) {
+        return { state: 'COMPLETED', statusCode: 400, message: 'Configure at least one preset group' }
+      }
+      const seen: { [key: string]: boolean } = {}
+      for (const vendor of ['navico', 'raymarine']) {
+        const rows = vendor === 'navico' ? navico : raymarine
+        const groups = vendor === 'navico' ? simradDisplayGroups : raymarineDisplayGroups
+        const enabledGroups = vendor === 'navico' ? navicoGroupsConfig() : raymarineGroupsConfig()
+        for (const row of rows) {
+          if (!row || typeof row.group !== 'string' || !Object.prototype.hasOwnProperty.call(groups, row.group) ||
+              !groupEnabled(enabledGroups, row.group) ||
+              (vendor === 'raymarine' && !raymarineI70Enabled()) ||
+              typeof row.brightness !== 'number' || !Number.isInteger(row.brightness) || row.brightness < 0 || row.brightness > 100 ||
+              (vendor === 'raymarine' && !Object.prototype.hasOwnProperty.call(raymarineColorMap, row.color)) ||
+              seen[vendor + '.' + row.group]) {
+            return { state: 'COMPLETED', statusCode: 400, message: `Invalid or duplicate ${vendor} group in ${value} preset` }
+          }
+          seen[vendor + '.' + row.group] = true
+        }
+      }
+      navico.forEach((row: any) => {
+        setSimradDisplayNightMode(row.group, value === 'night' ? 1 : 0)
+        setSimradDisplayBrightness(row.group, row.brightness / 100)
+      })
+      raymarine.forEach((row: any) => {
+        setRaymarineDisplayColor(row.group, row.color)
+        setRaymarineDisplayBrightness(row.group, row.brightness / 100)
+      })
+      app.handleMessage(plugin.id, intentDelta(path, value, { displayName: 'Applied display preset', enum: ['day', 'night'] }))
+      return { state: 'COMPLETED', statusCode: 200 }
+    })
   }
 
   function raymarineI70Enabled (): boolean {

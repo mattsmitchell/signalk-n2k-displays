@@ -6,6 +6,16 @@ This experimental fork builds on [Scott Bender's signalk-n2k-displays](https://g
 
 Development is informed by testing with Raymarine P70/i70 and B&G Zeus/Nemesis displays. Preset functionality is a development goal and is not yet complete or validated. Changes will be tested before being proposed upstream.
 
+## Experimental explicit presets
+
+The plugin configuration has an **Explicit display presets** section. When enabled, configure separate Day and Night rows for each B&G/Navico or Raymarine group to control. Each row has a group and integer brightness percentage from 0 to 100; Raymarine rows also select Day 1, Day 2, Inverse, or Red/Black. B&G day/night follows the selected preset. A group omitted from a preset is not targeted by that preset. Disable unused groups in the corresponding brand settings.
+
+For example, a night preset can contain B&G `default` at 66%, Raymarine `helm1` at 40% Red/Black, and Raymarine `cockpit` at 50% Inverse. From Node-RED or another authenticated Signal K client, PUT the string `night` or `day` to `electrical.displays.preset` using the Signal K v1 PUT API. Each PUT applies the entire configured preset once; repeating the PUT applies it again. Validation rejects invalid, duplicate, disabled, or empty groups before publishing any values.
+
+Explicit preset mode disables this plugin's startup mapping, automatic source steering, group synchronization, device resync, and its legacy vendor PUT handlers. Glass intent and deprecated display-mode PUTs return 409 while preset mode is enabled. The existing webapp controls these legacy paths and therefore cannot control presets yet. Preset mode does not disable other plugins or CZone output: configure only one controller for the same display groups to avoid conflicting commands. Other values published at startup are Signal K intent and metadata, not vendor display commands from this plugin.
+
+This branch publishes Signal K vendor paths; a separately configured `signalk-to-nmea2000` converter is needed to emit NMEA 2000. The companion converter and actual encoded frames have **not** been validated with these presets. In particular, B&G Day value and the Raymarine brightness Shared field need wire-level verification. Use offline testing first; the boat previously experienced unexplained brightness oscillation and reboots. A successful PUT confirms only that the plugin accepted and published the requested values, not that a display received or applied them.
+
 Signal K plugin that controls and syncs NMEA 2000 display devices from Raymarine and Navico.
 
 You can control brightness, night mode, and colors via Signal K.
